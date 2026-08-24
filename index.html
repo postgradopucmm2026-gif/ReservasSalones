@@ -391,11 +391,11 @@ const ICONS = {
 // STORAGE (config compartida del equipo)
 // ============================================================
 // Si vas a distribuir este archivo .html a tu equipo (por correo, carpeta
-// compartida, etc.), puedes "fijar" aquí la URL de tu Apps Script y los
-// correos de eventos para que todos abran el archivo ya configurado:
+// compartida, GitHub Pages, etc.), puedes "fijar" aquí la URL de tu Apps
+// Script para que todos abran el archivo ya conectado. Los correos de
+// Eventos por campus YA NO se configuran aquí: se leen automáticamente
+// desde la hoja "Configuracion" de tu Google Sheet (ver Code.gs).
 const DEFAULT_API_URL = ""; // <-- pega tu URL (https://script.google.com/.../exec) entre las comillas
-const DEFAULT_EVENTOS_CSD = ""; // <-- correo del Depto. de Eventos, campus Santo Domingo
-const DEFAULT_EVENTOS_CSTI = ""; // <-- correo del Depto. de Eventos, campus Santiago
 
 const hasClaudeStorage = typeof window.storage !== 'undefined' && window.storage;
 
@@ -417,18 +417,10 @@ async function setSetting(key, value) {
 
 async function loadConfig() {
   STATE.apiUrl = DEFAULT_API_URL || await getSetting('config:apiUrl');
-  STATE.eventosCSD = DEFAULT_EVENTOS_CSD || await getSetting('config:eventosCSD');
-  STATE.eventosCSTI = DEFAULT_EVENTOS_CSTI || await getSetting('config:eventosCSTI');
 }
 async function saveConfig(url) {
   STATE.apiUrl = url;
   await setSetting('config:apiUrl', url);
-}
-async function saveEventEmails(csd, csti) {
-  STATE.eventosCSD = csd;
-  STATE.eventosCSTI = csti;
-  await setSetting('config:eventosCSD', csd);
-  await setSetting('config:eventosCSTI', csti);
 }
 function correoEventosParaCampus(campus) {
   const c = String(campus || '').toUpperCase();
@@ -463,6 +455,8 @@ async function refreshData() {
     if (result.error) throw new Error(result.error);
     STATE.spaces = result.spaces || [];
     STATE.reservations = result.reservations || [];
+    STATE.eventosCSD = (result.config && result.config.EventosCSD) || '';
+    STATE.eventosCSTI = (result.config && result.config.EventosCSTI) || '';
     STATE.connError = null;
   } catch (e) {
     STATE.connError = e.message;
@@ -1061,7 +1055,7 @@ function settingsView() {
 
     <p class="section-title">Correos del Departamento de Eventos por campus</p>
     <div class="card config-box">
-      <p style="font-size:13px;color:var(--text-muted);margin-top:0;">Cuando alguien pida café, agua o asistencia de cocina al reservar un espacio, se notificará automáticamente al correo correspondiente al campus de ese espacio.</p>
+      <p style="font-size:13px;color:var(--text-muted);margin-top:0;">Cuando alguien pida café, agua o asistencia de cocina al reservar un espacio, se notificará automáticamente al correo correspondiente al campus de ese espacio. Estos correos se guardan en la hoja "Configuracion" de tu Google Sheet, así que todos los que usen la app ven los mismos, sin tener que configurarlos cada uno.</p>
       <div class="field">
         <label>Correo — Santo Domingo (CSD)</label>
         <input type="email" id="eventos-csd-input" placeholder="eventos.csd@pucmm.edu.do" value="${STATE.eventosCSD ? escapeHtml(STATE.eventosCSD) : ''}">
@@ -1079,7 +1073,7 @@ function settingsView() {
       <ol class="step-list">
         <li><span class="step-num">1</span>Abre tu Google Sheet y ve a <code class="inline">Extensiones → Apps Script</code>.</li>
         <li><span class="step-num">2</span>Pega el código que te compartí (archivo <code class="inline">Code.gs</code>) reemplazando el contenido existente.</li>
-        <li><span class="step-num">3</span>Ejecuta la función <code class="inline">configurarHojas</code> una vez (menú de funciones junto a "Ejecutar") para crear las pestañas automáticamente.</li>
+        <li><span class="step-num">3</span>Ejecuta la función <code class="inline">configurarHojas</code> una vez (menú de funciones junto a "Ejecutar") para crear las pestañas automáticamente, incluyendo "Configuracion".</li>
         <li><span class="step-num">4</span>Haz clic en <code class="inline">Implementar → Nueva implementación</code>, tipo "Aplicación web", acceso "Cualquier usuario dentro de tu organización".</li>
         <li><span class="step-num">5</span>Copia la URL que termina en <code class="inline">/exec</code> y pégala arriba.</li>
       </ol>
@@ -1301,6 +1295,8 @@ async function handleSaveSettings() {
     if (result.error) throw new Error(result.error);
     STATE.spaces = result.spaces || [];
     STATE.reservations = result.reservations || [];
+    STATE.eventosCSD = (result.config && result.config.EventosCSD) || '';
+    STATE.eventosCSTI = (result.config && result.config.EventosCSTI) || '';
     STATE.connError = null;
     msg.innerHTML = `<div class="banner success">Conexión exitosa. Se encontraron ${STATE.spaces.length} espacio(s).</div>`;
   } catch (err) {
@@ -1314,8 +1310,16 @@ async function handleSaveEventEmails() {
   const csd = document.getElementById('eventos-csd-input').value.trim();
   const csti = document.getElementById('eventos-csti-input').value.trim();
   const msg = document.getElementById('eventos-msg');
-  await saveEventEmails(csd, csti);
-  msg.innerHTML = `<div class="banner success">Correos de eventos guardados.</div>`;
+  msg.innerHTML = `<p style="color:var(--text-muted);">Guardando en el Sheet…</p>`;
+  try {
+    const result = await apiPost({ action: 'updateConfig', EventosCSD: csd, EventosCSTI: csti });
+    if (result.error) throw new Error(result.error);
+    STATE.eventosCSD = csd;
+    STATE.eventosCSTI = csti;
+    msg.innerHTML = `<div class="banner success">Correos de eventos guardados en el Sheet. Todos los que usen la app verán este cambio.</div>`;
+  } catch (err) {
+    msg.innerHTML = `<div class="banner error">No se pudo guardar: ${escapeHtml(err.message)}</div>`;
+  }
 }
 
 function handleUnlockSettings() {
