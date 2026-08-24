@@ -597,9 +597,19 @@ function navItem(key, label, icon) {
 }
 function attachNavHandlers() {
   document.querySelectorAll('[data-nav]').forEach(btn => {
-    btn.addEventListener('click', () => { STATE.view = btn.dataset.nav; render(); });
+    btn.addEventListener('click', () => {
+      STATE.view = btn.dataset.nav;
+      render();
+      // Refresca los datos del Sheet en segundo plano al cambiar de sección,
+      // para que las tarjetas y tablas nunca se queden con información vieja.
+      if (STATE.apiUrl && STATE.view !== 'settings') refreshData();
+    });
   });
-  document.getElementById('brand-home')?.addEventListener('click', () => { STATE.view = 'home'; render(); });
+  document.getElementById('brand-home')?.addEventListener('click', () => {
+    STATE.view = 'home';
+    render();
+    if (STATE.apiUrl) refreshData();
+  });
 }
 
 function renderMain() {
