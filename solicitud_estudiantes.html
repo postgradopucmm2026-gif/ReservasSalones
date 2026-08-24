@@ -1,404 +1,1085 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Solicitud de Espacio — Decanato de Postgrado PUCMM</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --ink:#0A1F44;
-    --ink-dark:#050F24;
-    --coral:#D22630;
-    --coral-dark:#A81E27;
-    --yellow:#FFD100;
-    --green:#2F7D4F;
-    --green-bg:#E3F5E6;
-    --red:#A24A3F;
-    --red-bg:#FBEAEB;
-    --bg:#F5F6F7;
-    --card:#FFFFFF;
-    --border:#E1E2E4;
-    --text:#1A1A1A;
-    --text-muted:#6B7280;
-    --teal-light:#E5EBF7;
-  }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;min-height:100%;}
-  body{
-    background:var(--bg);
-    color:var(--text);
-    font-family:'Work Sans',Arial,sans-serif;
-    font-size:14.5px;
-    line-height:1.5;
-    -webkit-font-smoothing:antialiased;
-    display:flex;
-    justify-content:center;
-    padding:32px 16px 60px;
-  }
-  .wrap{width:100%;max-width:560px;}
+/**
+ * PUCMM · DECANATO DE POSTGRADO
+ * GESTIÓN DE ESPACIOS DE REUNIONES — BACKEND (Google Apps Script)
+ * ------------------------------------------------------------------
+ * Pega este código en: tu Google Sheet > Extensiones > Apps Script
+ * Luego despliega como Web App (ver instrucciones al final del archivo).
+ *
+ * ESTRUCTURA ESPERADA DE HOJAS (ajusta los nombres si los tuyos son distintos):
+ *
+ * Hoja "Espacios"  -> columnas: ID | Nombre | Ubicacion | Capacidad | Equipamiento | Estado | Campus
+ * Hoja "Reservas"  -> columnas: ID | Espacio | Fecha | HoraInicio | HoraFin | SolicitadoPor |
+ *                                CorreoResponsable | Telefono | Motivo | ServiciosCocina |
+ *                                CantidadPersonas | Estado | CreadoEn
+ *
+ * NOTA SOBRE COLUMNAS: el script ahora AGREGA SOLO cualquier columna que le
+ * falte a una hoja ya existente (por ejemplo, si vienes de una versión
+ * anterior sin "ServiciosCocina"). No necesitas editar tu Sheet a mano.
+ *
+ * IMPORTANTE — PERMISOS DE CORREO:
+ * La primera vez que se ejecute una acción que envía correo, Google pedirá
+ * autorizar el permiso "Enviar correo electrónico en tu nombre". Esto es
+ * normal: los correos de confirmación se envían desde tu propia cuenta
+ * de Gmail/Google Workspace, sin necesidad de configurar nada más.
+ */
 
-  .top{
-    background:linear-gradient(135deg, var(--ink) 0%, var(--ink-dark) 100%);
-    border-radius:16px;
-    padding:28px 26px 26px;
-    text-align:center;
-    margin-bottom:20px;
-    position:relative;
-    overflow:hidden;
-  }
-  .top::after{
-    content:"";
-    position:absolute; top:-40px; right:-40px;
-    width:160px;height:160px;border-radius:50%;
-    background:radial-gradient(circle, rgba(255,209,0,0.16), transparent 70%);
-  }
-  .top img.logo{width:78px;height:78px;border-radius:50%;background:#fff;padding:4px;position:relative;z-index:1;}
-  .top h1{
-    font-family:'Work Sans',sans-serif;font-weight:800;font-size:21px;color:#fff;
-    margin:14px 0 4px;position:relative;z-index:1;
-  }
-  .top p{font-size:12.5px;color:rgba(255,255,255,0.75);margin:0;position:relative;z-index:1;}
+const SHEET_ESPACIOS = 'Espacios';
+const SHEET_RESERVAS = 'Reservas';
+const SHEET_CONFIG = 'Configuracion';
+const SHEET_SOLICITUDES = 'SolicitudesEstudiantes';
+const NOMBRE_REMITENTE = 'Decanato de Postgrado - PUCMM';
 
-  .card{
-    background:var(--card);border:1px solid var(--border);border-radius:14px;
-    padding:24px 22px;margin-bottom:16px;
-  }
+/**
+ * LLAVE ADMINISTRATIVA — protege del lado del servidor todas las acciones
+ * sensibles (crear/mover/cancelar reservas de personal, administrar
+ * espacios, cambiar configuración, aprobar/rechazar solicitudes, y ver
+ * datos personales de estudiantes/reservas). Sin esta llave exacta, el
+ * script rechaza la solicitud aunque alguien le escriba directamente a la
+ * URL sin pasar por ninguna de las dos apps.
+ *
+ * CAMBIA este valor por uno propio (letras, números, largo) y pon el MISMO
+ * valor exacto en la constante ADMIN_SECRET de gestion_espacios.html.
+ * La app de estudiantes (solicitud_estudiantes.html) NUNCA debe tener esta
+ * llave — por diseño, solo puede leer disponibilidad/espacios y crear
+ * solicitudes, que son acciones públicas a propósito.
+ */
+const ADMIN_SECRET = 'PUCMM-Postgrado-2026-9fK3mQ7z';
 
-  .field{margin-bottom:16px;}
-  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
-  label{font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em;}
-  input,select{
-    font-family:'Work Sans',sans-serif;font-size:14.5px;
-    padding:10px 12px;border-radius:8px;border:1px solid var(--border);
-    background:#fff;color:var(--text);width:100%;
-  }
-  input:focus,select:focus{outline:2px solid var(--ink);outline-offset:1px;}
-
-  .espacio-fijo{
-    display:flex;align-items:center;gap:10px;
-    background:var(--teal-light);border:1px solid #C9D6EE;border-radius:8px;
-    padding:11px 13px;font-weight:600;color:var(--ink);font-size:14.5px;
-  }
-  .espacio-fijo .qr-tag{
-    font-family:'IBM Plex Mono',monospace;font-size:10px;background:var(--yellow);color:var(--ink-dark);
-    padding:2px 8px;border-radius:20px;font-weight:700;
-  }
-
-  .btn{
-    display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;
-    padding:13px 18px;border-radius:9px;border:none;
-    background:var(--ink);color:#fff;
-    font-family:'Work Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;
-  }
-  .btn:hover{background:var(--ink-dark);}
-  .btn:disabled{background:#C7CBD1;cursor:not-allowed;}
-
-  .disponibilidad{
-    display:flex;align-items:center;gap:9px;
-    padding:11px 13px;border-radius:8px;font-size:13.5px;font-weight:600;margin-bottom:16px;
-  }
-  .disponibilidad.ok{background:var(--green-bg);color:var(--green);}
-  .disponibilidad.no{background:var(--red-bg);color:var(--red);}
-  .disponibilidad.checking{background:#F1F2F4;color:var(--text-muted);}
-  .disp-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;}
-
-  .banner{
-    padding:12px 15px;border-radius:9px;font-size:13.5px;margin-bottom:16px;
-  }
-  .banner.error{background:var(--red-bg);color:var(--red);}
-  .banner.success{background:var(--green-bg);color:var(--green);}
-
-  .footer-note{text-align:center;font-size:11.5px;color:var(--text-muted);margin-top:18px;line-height:1.6;}
-
-  .success-screen{text-align:center;padding:20px 6px;}
-  .success-icon{
-    width:60px;height:60px;border-radius:50%;background:var(--green-bg);color:var(--green);
-    display:flex;align-items:center;justify-content:center;font-size:30px;margin:0 auto 16px;
-  }
-  .success-screen h2{font-family:'Work Sans',sans-serif;font-weight:800;font-size:20px;color:var(--ink);margin:0 0 8px;}
-  .success-screen p{font-size:13.5px;color:var(--text-muted);margin:0 0 20px;line-height:1.6;}
-
-  .loading-screen{text-align:center;padding:60px 10px;color:var(--text-muted);}
-</style>
-</head>
-<body>
-<div class="wrap" id="app"></div>
-
-<script>
-// ============================================================
-// CONFIGURACIÓN — esta es la ÚNICA URL que necesita esta app.
-// Debe ser la misma URL de Apps Script que usa la app del Decanato.
-// ============================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyKKl28RLY9NdegZ--AY5_eQ-7F2n6HlcYZxvJfk4jYtaJNlTTnNzIISYauaVo0jBImoA/exec";
-
-const LOGO_BASE64 = "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";
-
-const params = new URLSearchParams(window.location.search);
-const ESPACIO_FIJO = params.get('espacio') || '';
-
-let STATE = {
-  loading: true,
-  spaces: [],
-  connError: null,
-  submitted: false,
-  disponibilidad: null, // null | 'checking' | {disponible, motivo}
-  ultimaConsulta: '', // para no repetir la misma llamada
-};
-
-async function apiGet(action, extraParams) {
-  const u = new URL(API_URL);
-  u.searchParams.set('action', action);
-  if (extraParams) Object.keys(extraParams).forEach(k => u.searchParams.set(k, extraParams[k]));
-  const res = await fetch(u.toString());
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+function autorizado(clave) {
+  return clave === ADMIN_SECRET;
 }
-async function apiPost(payload) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload),
+
+
+const ESPACIOS_HEADERS = ['ID', 'Nombre', 'Ubicacion', 'Capacidad', 'Equipamiento', 'Estado', 'Campus'];
+const RESERVAS_HEADERS = ['ID', 'Espacio', 'Fecha', 'HoraInicio', 'HoraFin', 'SolicitadoPor',
+                           'CorreoResponsable', 'Telefono', 'Motivo', 'ServiciosCocina',
+                           'CantidadPersonas', 'TipoServicio', 'CuentaCargo', 'Estado', 'CreadoEn'];
+const CONFIG_HEADERS = ['Clave', 'Valor'];
+const CONFIG_CLAVES_DEFECTO = ['EventosCSD', 'EventosCSTI'];
+const SOLICITUDES_HEADERS = ['ID', 'Espacio', 'Fecha', 'HoraInicio', 'HoraFin', 'NombreCompleto',
+                              'IDEstudiante', 'Correo', 'Telefono', 'Coordinador', 'Estado',
+                              'RazonRechazo', 'CreadoEn'];
+const COLUMNAS_HORA = ['HoraInicio', 'HoraFin']; // columnas que SIEMPRE deben guardarse como texto plano
+
+// ----------------------------------------------------------------
+// AUTO-MIGRACIÓN DE COLUMNAS
+// ----------------------------------------------------------------
+/**
+ * Revisa el encabezado real de la hoja y agrega, al final, cualquier columna
+ * de "headersNecesarios" que todavía no exista. Nunca borra ni reordena
+ * columnas existentes. Devuelve la lista de encabezados ya actualizada.
+ */
+function asegurarColumnas(sheet, headersNecesarios) {
+  const lastCol = sheet.getLastColumn();
+  let headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim()) : [];
+  let cambio = false;
+  headersNecesarios.forEach(h => {
+    if (headers.indexOf(h) === -1) {
+      headers.push(h);
+      cambio = true;
+    }
   });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
-}
-
-function escapeHtml(str) {
-  return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function todayStr() {
-  const d = new Date();
-  return d.toISOString().slice(0,10);
-}
-function activeSpaces() {
-  return STATE.spaces.filter(s => (s.Estado || 'Activo') !== 'Inactivo');
-}
-
-async function cargarEspacios() {
-  STATE.loading = true; render();
-  try {
-    const result = await apiGet('spaces');
-    if (result.error) throw new Error(result.error);
-    STATE.spaces = result.data || [];
-    STATE.connError = null;
-  } catch (e) {
-    STATE.connError = e.message;
+  if (cambio) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold').setFontColor('#FFFFFF').setBackground('#0A1F44');
+    sheet.setFrozenRows(1);
   }
-  STATE.loading = false;
-  render();
-}
-
-function render() {
-  const app = document.getElementById('app');
-  if (STATE.submitted) {
-    app.innerHTML = successScreen();
-    attachHandlers();
-    return;
-  }
-  if (STATE.loading) {
-    app.innerHTML = topBlock() + `<div class="loading-screen">Cargando espacios disponibles…</div>`;
-    return;
-  }
-  app.innerHTML = topBlock() + formScreen();
-  attachHandlers();
-}
-
-function topBlock() {
-  return `
-    <div class="top">
-      <img class="logo" src="data:image/png;base64,${LOGO_BASE64}" alt="PUCMM">
-      <h1>Solicitud de Espacio de Reunión</h1>
-      <p>Decanato de Postgrado · PUCMM</p>
-    </div>
-  `;
-}
-
-function formScreen() {
-  const spaces = activeSpaces();
-  const espacioValido = ESPACIO_FIJO && spaces.some(s => s.Nombre === ESPACIO_FIJO);
-
-  return `
-    <div class="card">
-      ${STATE.connError ? `<div class="banner error">No se pudo cargar la información: ${escapeHtml(STATE.connError)}</div>` : ''}
-      <form id="solicitud-form">
-        <div class="field">
-          <label>Espacio</label>
-          ${espacioValido ? `
-            <div class="espacio-fijo">
-              ${escapeHtml(ESPACIO_FIJO)}
-              <span class="qr-tag">Asignado por QR</span>
-            </div>
-            <input type="hidden" name="Espacio" value="${escapeHtml(ESPACIO_FIJO)}">
-          ` : `
-            <select name="Espacio" id="espacio-select" required>
-              <option value="">Selecciona un espacio…</option>
-              ${spaces.map(s => `<option value="${escapeHtml(s.Nombre)}">${escapeHtml(s.Nombre)} (${escapeHtml(s.Capacidad||'—')} pers.)</option>`).join('')}
-            </select>
-          `}
-        </div>
-
-        <div class="field">
-          <label>Fecha</label>
-          <input type="date" name="Fecha" id="fecha-input" required min="${todayStr()}" value="${todayStr()}">
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label>Hora de inicio</label>
-            <input type="time" name="HoraInicio" id="hora-inicio-input" required>
-          </div>
-          <div class="field">
-            <label>Hora de fin</label>
-            <input type="time" name="HoraFin" id="hora-fin-input" required>
-          </div>
-        </div>
-
-        <div id="disponibilidad-box"></div>
-
-        <div class="field">
-          <label>Nombre completo</label>
-          <input type="text" name="NombreCompleto" placeholder="Nombre y apellido" required>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label>ID / Matrícula</label>
-            <input type="text" name="IDEstudiante" placeholder="Ej. 2020-1234" required>
-          </div>
-          <div class="field">
-            <label>Teléfono</label>
-            <input type="tel" name="Telefono" placeholder="809-000-0000" required>
-          </div>
-        </div>
-        <div class="field">
-          <label>Correo electrónico</label>
-          <input type="email" name="Correo" placeholder="nombre@est.pucmm.edu.do" required>
-        </div>
-        <div class="field">
-          <label>Coordinador</label>
-          <input type="text" name="Coordinador" placeholder="Nombre del coordinador de tu programa" required>
-        </div>
-
-        <div id="solicitud-msg"></div>
-        <button type="submit" class="btn" id="submit-btn" disabled>Enviar solicitud</button>
-      </form>
-    </div>
-    <p class="footer-note">Tu solicitud quedará pendiente de aprobación por parte del Decanato de Postgrado. Te notificaremos por correo electrónico si fue aprobada o rechazada.</p>
-  `;
-}
-
-function successScreen() {
-  return `
-    <div class="card success-screen">
-      <div class="success-icon">✓</div>
-      <h2>Solicitud enviada</h2>
-      <p>Tu solicitud fue registrada y quedará pendiente de aprobación por parte del Decanato de Postgrado. Te notificaremos por correo electrónico en cuanto sea aprobada o rechazada.</p>
-      <button class="btn" id="nueva-solicitud-btn">Enviar otra solicitud</button>
-    </div>
-  `;
-}
-
-function attachHandlers() {
-  document.getElementById('nueva-solicitud-btn')?.addEventListener('click', () => {
-    STATE.submitted = false;
-    STATE.disponibilidad = null;
-    render();
+  // Las columnas de hora se fuerzan a "texto plano" para toda la columna,
+  // así Google Sheets nunca las convierte en un valor de hora/fecha internamente
+  // (eso es lo que causaba que HoraInicio se leyera como 1899-12-31T...).
+  headers.forEach((h, i) => {
+    if (COLUMNAS_HORA.indexOf(h) !== -1) {
+      sheet.getRange(1, i + 1, Math.max(sheet.getMaxRows(), 2), 1).setNumberFormat('@');
+    }
   });
-
-  const form = document.getElementById('solicitud-form');
-  if (!form) return;
-
-  form.addEventListener('submit', handleSubmit);
-
-  const espacioSelect = document.getElementById('espacio-select');
-  const fechaInput = document.getElementById('fecha-input');
-  const horaInicioInput = document.getElementById('hora-inicio-input');
-  const horaFinInput = document.getElementById('hora-fin-input');
-
-  [espacioSelect, fechaInput, horaInicioInput, horaFinInput].forEach(el => {
-    el?.addEventListener('change', () => checkDisponibilidad(form));
-  });
-
-  checkDisponibilidad(form); // por si ya viene todo prellenado (ej. fecha por defecto)
+  return headers;
 }
 
-let disponibilidadTimer = null;
-function checkDisponibilidad(form) {
-  const espacio = form.querySelector('[name="Espacio"]')?.value;
-  const fecha = form.querySelector('[name="Fecha"]')?.value;
-  const horaInicio = form.querySelector('[name="HoraInicio"]')?.value;
-  const horaFin = form.querySelector('[name="HoraFin"]')?.value;
-  const box = document.getElementById('disponibilidad-box');
-  const btn = document.getElementById('submit-btn');
+/** Agrega una fila nueva ubicando cada valor bajo el encabezado correcto,
+ *  sin importar el orden real de columnas en la hoja. Crea las columnas
+ *  que falten automáticamente. */
+function appendRowByHeaders(sheet, valuesObj) {
+  const headers = asegurarColumnas(sheet, Object.keys(valuesObj));
+  const row = headers.map(h => (h in valuesObj) ? valuesObj[h] : '');
+  sheet.appendRow(row);
+}
 
-  if (!espacio || !fecha || !horaInicio || !horaFin) {
-    box.innerHTML = '';
-    btn.disabled = true;
-    STATE.disponibilidad = null;
-    return;
+// ----------------------------------------------------------------
+// CONFIGURACIÓN INICIAL — EJECUTAR ESTA FUNCIÓN UNA SOLA VEZ
+// ----------------------------------------------------------------
+/**
+ * Crea las hojas "Espacios" y "Reservas" con sus encabezados correctos si
+ * todavía no existen (no borra ni toca nada si ya existen). También agrega
+ * dos filas de ejemplo en "Espacios" la primera vez, para que sepas cómo
+ * llenarla.
+ *
+ * CÓMO EJECUTARLA:
+ * 1. En el editor de Apps Script, en el menú desplegable de funciones
+ *    (arriba, junto al botón "Ejecutar"), selecciona "configurarHojas".
+ * 2. Haz clic en "Ejecutar". La primera vez te pedirá autorizar permisos:
+ *    acéptalos (son los mismos que usa el resto del script).
+ * 3. Revisa tu Google Sheet: deberían aparecer las dos pestañas ya listas.
+ */
+function configurarHojas() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const resultado = [];
+
+  resultado.push(asegurarHoja(ss, SHEET_ESPACIOS, ESPACIOS_HEADERS, [
+    ['', 'Sala de Juntas 1', 'Piso 2, ala norte', 8, 'Proyector, TV, Pizarra', 'Activo', 'Santiago (CSTI)'],
+    ['', 'Sala de Juntas 2', 'Piso 3, ala sur', 14, 'Videoconferencia, Proyector', 'Activo', 'Santo Domingo (CSD)'],
+  ], 1));
+
+  resultado.push(asegurarHoja(ss, SHEET_RESERVAS, RESERVAS_HEADERS, []));
+
+  resultado.push(asegurarHoja(ss, SHEET_CONFIG, CONFIG_HEADERS, [
+    ['EventosCSD', ''],
+    ['EventosCSTI', ''],
+  ]));
+
+  resultado.push(asegurarHoja(ss, SHEET_SOLICITUDES, SOLICITUDES_HEADERS, []));
+
+  Logger.log(resultado.join(' | '));
+  return resultado.join(' | ');
+}
+
+function asegurarHoja(ss, nombre, headers, filasEjemplo, colMuted) {
+  let sheet = ss.getSheetByName(nombre);
+  const yaExistia = !!sheet;
+
+  if (!sheet) {
+    sheet = ss.insertSheet(nombre);
   }
-  if (horaInicio >= horaFin) {
-    box.innerHTML = `<div class="disponibilidad no"><span class="disp-dot"></span>La hora de inicio debe ser antes que la hora de fin.</div>`;
-    btn.disabled = true;
-    return;
-  }
 
-  const clave = [espacio, fecha, horaInicio, horaFin].join('|');
-  if (clave === STATE.ultimaConsulta) return; // evita repetir la misma consulta
-  STATE.ultimaConsulta = clave;
+  // Encabezados: solo los escribe si la fila 1 está vacía, para no pisar una hoja que ya tenías.
+  const primeraFila = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  const filaVacia = primeraFila.every(v => v === '' || v === null);
+  if (filaVacia) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setFontColor('#FFFFFF')
+      .setBackground('#0A1F44');
+    sheet.setFrozenRows(1);
+    for (let i = 0; i < headers.length; i++) sheet.autoResizeColumn(i + 1);
 
-  box.innerHTML = `<div class="disponibilidad checking"><span class="disp-dot"></span>Verificando disponibilidad…</div>`;
-  btn.disabled = true;
-
-  clearTimeout(disponibilidadTimer);
-  disponibilidadTimer = setTimeout(async () => {
-    try {
-      const result = await apiGet('disponibilidad', { espacio, fecha, horaInicio, horaFin });
-      if (STATE.ultimaConsulta !== clave) return; // el usuario ya cambió algo mientras esperábamos
-      if (result.disponible) {
-        box.innerHTML = `<div class="disponibilidad ok"><span class="disp-dot"></span>Este espacio está disponible en ese horario.</div>`;
-        btn.disabled = false;
-      } else {
-        box.innerHTML = `<div class="disponibilidad no"><span class="disp-dot"></span>${escapeHtml(result.motivo || 'Este salón está ocupado en ese horario.')}</div>`;
-        btn.disabled = true;
+    if (filasEjemplo && filasEjemplo.length) {
+      sheet.getRange(2, 1, filasEjemplo.length, headers.length).setValues(filasEjemplo);
+      if (colMuted) {
+        sheet.getRange(2, colMuted, filasEjemplo.length, 1).setFontColor('#999999').setFontStyle('italic');
       }
-    } catch (err) {
-      box.innerHTML = `<div class="banner error">No se pudo verificar disponibilidad: ${escapeHtml(err.message)}</div>`;
-      btn.disabled = true;
     }
-  }, 400); // pequeño debounce para no saturar de llamadas mientras el usuario escribe/cambia
+    return nombre + ': creada con encabezados' + (filasEjemplo.length ? ' y ejemplos' : '');
+  }
+
+  return nombre + (yaExistia ? ': ya existía, no se modificó' : ': creada (encabezados existentes se respetaron)');
 }
 
-async function handleSubmit(e) {
-  e.preventDefault();
-  const form = e.target;
-  const btn = document.getElementById('submit-btn');
-  const msg = document.getElementById('solicitud-msg');
-  const data = Object.fromEntries(new FormData(form).entries());
-  data.action = 'crearSolicitud';
+// ----------------------------------------------------------------
+// PUNTOS DE ENTRADA
+// ----------------------------------------------------------------
 
-  btn.disabled = true; btn.textContent = 'Enviando…';
-  msg.innerHTML = '';
+function doGet(e) {
+  // Nota: si ejecutas doGet manualmente desde el editor (botón "Ejecutar"),
+  // "e" llega undefined porque no hay una solicitud HTTP real. Esta guarda
+  // evita que truene y explica qué hacer en su lugar.
+  const params = (e && e.parameter) || {};
+  const action = params.action;
+  if (!e) {
+    return jsonResponse({
+      error: 'No hay una solicitud real. No pruebes doGet con el botón "Ejecutar" del editor: ' +
+             'abre la URL publicada (termina en /exec) en el navegador, agregando ?action=all al final.'
+    });
+  }
+  // ---- Acciones públicas (las usa también la app de estudiantes) ----
+  if (action === 'spaces') return jsonResponse({ data: getSpaces() });
+  if (action === 'disponibilidad') {
+    return jsonResponse(checkDisponibilidad(params.espacio, params.fecha, params.horaInicio, params.horaFin, params.excluirId || null));
+  }
+
+  // ---- Acciones administrativas: requieren la llave ----
+  if (!autorizado(params.adminKey)) {
+    return jsonResponse({ error: 'No autorizado.' });
+  }
+  if (action === 'reservations') return jsonResponse({ data: getReservations() });
+  if (action === 'config') return jsonResponse({ data: getConfig() });
+  if (action === 'solicitudes') return jsonResponse({ data: getSolicitudes() });
+  if (action === 'all') return jsonResponse({ spaces: getSpaces(), reservations: getReservations(), config: getConfig(), solicitudes: getSolicitudes() });
+  return jsonResponse({ error: 'Acción no reconocida: ' + action });
+}
+
+function doPost(e) {
+  if (!e || !e.postData) {
+    return jsonResponse({
+      error: 'No hay una solicitud real. No pruebes doPost con el botón "Ejecutar" del editor: ' +
+             'esta función solo funciona cuando la app web le envía datos a la URL publicada (/exec).'
+    });
+  }
+  let body;
   try {
-    const result = await apiPost(data);
-    if (result.error) {
-      msg.innerHTML = `<div class="banner error">${escapeHtml(result.error)}</div>`;
-      btn.disabled = false; btn.textContent = 'Enviar solicitud';
-    } else {
-      STATE.submitted = true;
-      render();
-    }
+    body = JSON.parse(e.postData.contents);
   } catch (err) {
-    msg.innerHTML = `<div class="banner error">No se pudo enviar la solicitud: ${escapeHtml(err.message)}</div>`;
-    btn.disabled = false; btn.textContent = 'Enviar solicitud';
+    return jsonResponse({ error: 'Cuerpo de la solicitud inválido' });
+  }
+  const action = body.action;
+  try {
+    // ---- Única acción pública de escritura: la usa la app de estudiantes ----
+    if (action === 'crearSolicitud') return jsonResponse(crearSolicitud(body));
+
+    // ---- Todo lo demás requiere la llave administrativa ----
+    if (!autorizado(body.adminKey)) {
+      return jsonResponse({ error: 'No autorizado.' });
+    }
+    if (action === 'createReservation') return jsonResponse(createReservation(body));
+    if (action === 'moveReservation') return jsonResponse(moveReservation(body));
+    if (action === 'cancelReservation') return jsonResponse(cancelReservation(body));
+    if (action === 'addSpace') return jsonResponse(addSpace(body));
+    if (action === 'updateSpace') return jsonResponse(updateSpace(body));
+    if (action === 'deleteSpace') return jsonResponse(deleteSpace(body.id));
+    if (action === 'updateConfig') return jsonResponse(updateConfig(body));
+    if (action === 'aprobarSolicitud') return jsonResponse(aprobarSolicitud(body));
+    if (action === 'rechazarSolicitud') return jsonResponse(rechazarSolicitud(body));
+    return jsonResponse({ error: 'Acción no reconocida: ' + action });
+  } catch (err) {
+    return jsonResponse({ error: err.message });
   }
 }
 
-// ============================================================
-// INIT
-// ============================================================
-render();
-cargarEspacios();
-</script>
-</body>
-</html>
+// ----------------------------------------------------------------
+// HELPERS
+// ----------------------------------------------------------------
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    // Autocreación defensiva: si por alguna razón la hoja no existe todavía
+    // (por ejemplo, nunca corriste configurarHojas), la crea al vuelo.
+    const headers = name === SHEET_ESPACIOS ? ESPACIOS_HEADERS
+                  : name === SHEET_RESERVAS ? RESERVAS_HEADERS
+                  : name === SHEET_CONFIG ? CONFIG_HEADERS
+                  : name === SHEET_SOLICITUDES ? SOLICITUDES_HEADERS
+                  : null;
+    if (!headers) throw new Error('No se encontró la hoja "' + name + '" y no sé qué encabezados usar.');
+    asegurarHoja(ss, name, headers, []);
+    sheet = ss.getSheetByName(name);
+  }
+  return sheet;
+}
+
+function sheetToObjects(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  const headers = data[0].map(h => String(h).trim());
+  return data.slice(1)
+    .filter(row => row[0] !== '' && row[0] !== null)
+    .map((row, idx) => {
+      const obj = { _row: idx + 2 }; // fila real en el sheet, útil para updates
+      headers.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    });
+}
+
+function fmtDate(d) {
+  if (Object.prototype.toString.call(d) === '[object Date]') {
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return d;
+}
+
+/** Convierte una celda de hora a texto "HH:mm" (24h). Si Google Sheets
+ *  convirtió el valor a un objeto de fecha/hora interno (por eso el bug de
+ *  "1899-12-31T..."), esto lo normaliza de vuelta a texto simple. */
+function fmtTime(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'HH:mm');
+  }
+  return v;
+}
+
+// ----------------------------------------------------------------
+// CONFIGURACIÓN (correos del Departamento de Eventos por campus, etc.)
+// ----------------------------------------------------------------
+/** Lee la hoja "Configuracion" (columnas Clave | Valor) y la devuelve como
+ *  un objeto plano, ej. { EventosCSD: 'x@y.com', EventosCSTI: 'a@b.com' }. */
+function getConfig() {
+  const sheet = getSheet(SHEET_CONFIG);
+  const filas = sheetToObjects(sheet);
+  const config = {};
+  CONFIG_CLAVES_DEFECTO.forEach(k => config[k] = '');
+  filas.forEach(f => { if (f.Clave) config[f.Clave] = f.Valor || ''; });
+  return config;
+}
+
+/** Actualiza (o crea) una o más filas Clave/Valor. body puede traer
+ *  cualquier combinación de EventosCSD / EventosCSTI (u otras claves futuras). */
+function updateConfig(body) {
+  const sheet = getSheet(SHEET_CONFIG);
+  const data = sheet.getDataRange().getValues();
+
+  Object.keys(body).forEach(clave => {
+    if (clave === 'action') return;
+    let encontrada = false;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === clave) {
+        sheet.getRange(i + 1, 2).setValue(body[clave]);
+        encontrada = true;
+        break;
+      }
+    }
+    if (!encontrada) {
+      sheet.appendRow([clave, body[clave]]);
+    }
+  });
+
+  return { success: true, config: getConfig() };
+}
+
+// ----------------------------------------------------------------
+// ESPACIOS
+// ----------------------------------------------------------------
+
+function getSpaces() {
+  return sheetToObjects(getSheet(SHEET_ESPACIOS));
+}
+
+function addSpace(body) {
+  const sheet = getSheet(SHEET_ESPACIOS);
+  const id = Utilities.getUuid();
+  appendRowByHeaders(sheet, {
+    ID: id,
+    Nombre: body.Nombre || '',
+    Ubicacion: body.Ubicacion || '',
+    Capacidad: body.Capacidad || '',
+    Equipamiento: body.Equipamiento || '',
+    Estado: 'Activo',
+    Campus: body.Campus || '',
+  });
+  return { success: true, id: id };
+}
+
+function updateSpace(body) {
+  const sheet = getSheet(SHEET_ESPACIOS);
+  const headers = asegurarColumnas(sheet, ESPACIOS_HEADERS);
+  const col = name => headers.indexOf(name) + 1;
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === body.id) {
+      const row = i + 1;
+      sheet.getRange(row, col('Nombre')).setValue(body.Nombre);
+      sheet.getRange(row, col('Ubicacion')).setValue(body.Ubicacion);
+      sheet.getRange(row, col('Capacidad')).setValue(body.Capacidad);
+      sheet.getRange(row, col('Equipamiento')).setValue(body.Equipamiento);
+      sheet.getRange(row, col('Estado')).setValue(body.Estado || 'Activo');
+      sheet.getRange(row, col('Campus')).setValue(body.Campus || '');
+      return { success: true };
+    }
+  }
+  return { error: 'Espacio no encontrado' };
+}
+
+function deleteSpace(id) {
+  // "Eliminar" = marcar Inactivo, para no perder el historial de reservas asociadas
+  const sheet = getSheet(SHEET_ESPACIOS);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === id) {
+      sheet.getRange(i + 1, 6).setValue('Inactivo');
+      return { success: true };
+    }
+  }
+  return { error: 'Espacio no encontrado' };
+}
+
+// ----------------------------------------------------------------
+// RESERVAS
+// ----------------------------------------------------------------
+
+function getReservations() {
+  return sheetToObjects(getSheet(SHEET_RESERVAS)).map(r => {
+    r.Fecha = fmtDate(r.Fecha);
+    r.HoraInicio = fmtTime(r.HoraInicio);
+    r.HoraFin = fmtTime(r.HoraFin);
+    return r;
+  });
+}
+
+function validarCamposReserva(body) {
+  const required = ['Espacio', 'Fecha', 'HoraInicio', 'HoraFin', 'SolicitadoPor', 'CorreoResponsable', 'Telefono', 'Motivo'];
+  for (const field of required) {
+    if (!body[field]) return 'Falta el campo: ' + field;
+  }
+  if (body.HoraInicio >= body.HoraFin) {
+    return 'La hora de inicio debe ser antes que la hora de fin';
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.CorreoResponsable)) {
+    return 'El correo electrónico no parece válido';
+  }
+  return null;
+}
+
+function hayChoque(espacio, fecha, horaInicio, horaFin, excluirId) {
+  const existentes = getReservations().filter(r =>
+    r.Espacio === espacio &&
+    r.Fecha === fecha &&
+    r.Estado !== 'Cancelada' &&
+    r.ID !== excluirId
+  );
+  for (const r of existentes) {
+    const solapa = horaInicio < r.HoraFin && horaFin > r.HoraInicio;
+    if (solapa) {
+      return 'Ese espacio ya está reservado de ' + r.HoraInicio + ' a ' + r.HoraFin + ' ese día.';
+    }
+  }
+  return null;
+}
+
+// ==================================================================
+// SOLICITUDES DE ESTUDIANTES (App de estudiantes — solo lectura/creación)
+// ==================================================================
+
+function getSolicitudes() {
+  return sheetToObjects(getSheet(SHEET_SOLICITUDES)).map(s => {
+    s.Fecha = fmtDate(s.Fecha);
+    s.HoraInicio = fmtTime(s.HoraInicio);
+    s.HoraFin = fmtTime(s.HoraFin);
+    return s;
+  });
+}
+
+/** Verifica disponibilidad de un espacio cruzando RESERVAS CONFIRMADAS y
+ *  SOLICITUDES pendientes/aprobadas (para que dos estudiantes no puedan
+ *  solicitar el mismo horario al mismo tiempo). */
+function checkDisponibilidad(espacio, fecha, horaInicio, horaFin, excluirSolicitudId) {
+  const choqueReserva = hayChoque(espacio, fecha, horaInicio, horaFin, null);
+  if (choqueReserva) return { disponible: false, motivo: choqueReserva };
+
+  const solicitudes = getSolicitudes().filter(s =>
+    s.Espacio === espacio &&
+    s.Fecha === fecha &&
+    (s.Estado === 'Pendiente' || s.Estado === 'Aprobada') &&
+    s.ID !== excluirSolicitudId
+  );
+  for (const s of solicitudes) {
+    const solapa = horaInicio < s.HoraFin && horaFin > s.HoraInicio;
+    if (solapa) {
+      return {
+        disponible: false,
+        motivo: 'Ese espacio ya tiene una solicitud ' + s.Estado.toLowerCase() + ' de ' +
+                fmtHora12(s.HoraInicio) + ' a ' + fmtHora12(s.HoraFin) + ' ese día.'
+      };
+    }
+  }
+  return { disponible: true };
+}
+
+function validarCamposSolicitud(body) {
+  const required = ['Espacio', 'Fecha', 'HoraInicio', 'HoraFin', 'NombreCompleto', 'IDEstudiante', 'Correo', 'Telefono', 'Coordinador'];
+  for (const f of required) {
+    if (!body[f]) return 'Falta el campo: ' + f;
+  }
+  if (body.HoraInicio >= body.HoraFin) return 'La hora de inicio debe ser antes que la hora de fin';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.Correo)) return 'El correo electrónico no parece válido';
+  return null;
+}
+
+// Duración máxima de una solicitud de estudiante: 2 horas por reserva. Si
+// necesitan más tiempo, deben enviar una solicitud adicional (renovación)
+// para el bloque siguiente.
+const DURACION_MAXIMA_MINUTOS = 120;
+
+function validarDuracionMaximaSolicitud(horaInicio, horaFin) {
+  const [h1, m1] = horaInicio.split(':').map(Number);
+  const [h2, m2] = horaFin.split(':').map(Number);
+  const minutos = (h2 * 60 + m2) - (h1 * 60 + m1);
+  if (minutos > DURACION_MAXIMA_MINUTOS) {
+    return 'El máximo permitido por solicitud es 2 horas. Si necesitas más tiempo, envía una solicitud adicional (renovación) para el bloque siguiente.';
+  }
+  return null;
+}
+
+// Horario de atención para solicitudes de estudiantes:
+// Lunes a viernes 9:00 am – 9:00 pm · Sábados 8:30 am – 2:00 pm · Domingos cerrado.
+function diaSemanaLocal(fecha) {
+  const partes = fecha.split('-').map(Number);
+  const d = new Date(partes[0], partes[1] - 1, partes[2]);
+  return d.getDay(); // 0=domingo … 6=sábado
+}
+
+function validarHorarioAtencion(fecha, horaInicio, horaFin) {
+  const dia = diaSemanaLocal(fecha);
+  let apertura, cierre, etiquetaDia;
+  if (dia >= 1 && dia <= 5) {
+    apertura = '09:00'; cierre = '21:00'; etiquetaDia = 'de lunes a viernes';
+  } else if (dia === 6) {
+    apertura = '08:30'; cierre = '14:00'; etiquetaDia = 'los sábados';
+  } else {
+    return 'Los domingos no se reciben solicitudes de espacios.';
+  }
+  if (horaInicio < apertura || horaFin > cierre) {
+    return 'El horario de atención ' + etiquetaDia + ' es de ' + fmtHora12(apertura) + ' a ' + fmtHora12(cierre) + '.';
+  }
+  return null;
+}
+
+function crearSolicitud(body) {
+  const error = validarCamposSolicitud(body);
+  if (error) return { error: error };
+
+  const errorDuracion = validarDuracionMaximaSolicitud(body.HoraInicio, body.HoraFin);
+  if (errorDuracion) return { error: errorDuracion };
+
+  const errorHorario = validarHorarioAtencion(body.Fecha, body.HoraInicio, body.HoraFin);
+  if (errorHorario) return { error: errorHorario };
+
+  const disp = checkDisponibilidad(body.Espacio, body.Fecha, body.HoraInicio, body.HoraFin, null);
+  if (!disp.disponible) return { error: disp.motivo || 'Ese espacio no está disponible en ese horario.' };
+
+  const sheet = getSheet(SHEET_SOLICITUDES);
+  const id = Utilities.getUuid();
+  appendRowByHeaders(sheet, {
+    ID: id,
+    Espacio: body.Espacio,
+    Fecha: body.Fecha,
+    HoraInicio: body.HoraInicio,
+    HoraFin: body.HoraFin,
+    NombreCompleto: body.NombreCompleto,
+    IDEstudiante: body.IDEstudiante,
+    Correo: body.Correo,
+    Telefono: body.Telefono,
+    Coordinador: body.Coordinador,
+    Estado: 'Pendiente',
+    RazonRechazo: '',
+    CreadoEn: new Date(),
+  });
+
+  enviarCorreoSolicitud('recibida', {
+    Espacio: body.Espacio, Fecha: body.Fecha, HoraInicio: body.HoraInicio, HoraFin: body.HoraFin,
+    NombreCompleto: body.NombreCompleto, Coordinador: body.Coordinador, Correo: body.Correo,
+  });
+
+  return { success: true, id: id };
+}
+
+function aprobarSolicitud(body) {
+  if (!body.id) return { error: 'Falta el id de la solicitud' };
+  const sheet = getSheet(SHEET_SOLICITUDES);
+  const headers = asegurarColumnas(sheet, SOLICITUDES_HEADERS);
+  const col = name => headers.indexOf(name) + 1;
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === body.id) {
+      const row = i + 1;
+      const s = {
+        Espacio: data[i][col('Espacio') - 1],
+        Fecha: fmtDate(data[i][col('Fecha') - 1]),
+        HoraInicio: fmtTime(data[i][col('HoraInicio') - 1]),
+        HoraFin: fmtTime(data[i][col('HoraFin') - 1]),
+        NombreCompleto: data[i][col('NombreCompleto') - 1],
+        IDEstudiante: data[i][col('IDEstudiante') - 1],
+        Correo: data[i][col('Correo') - 1],
+        Telefono: data[i][col('Telefono') - 1],
+        Coordinador: data[i][col('Coordinador') - 1],
+        Estado: data[i][col('Estado') - 1],
+      };
+
+      if (s.Estado !== 'Pendiente') return { error: 'Esta solicitud ya fue procesada (' + s.Estado + ').' };
+
+      const disp = checkDisponibilidad(s.Espacio, s.Fecha, s.HoraInicio, s.HoraFin, body.id);
+      if (!disp.disponible) {
+        return { error: 'Ya no se puede aprobar: ' + (disp.motivo || 'el espacio dejó de estar disponible.') };
+      }
+
+      // Crea la reserva real en la hoja de Reservas (sin disparar el correo
+      // normal de "reserva confirmada"; en su lugar se envía uno específico
+      // de "solicitud aprobada", más claro para el estudiante).
+      const sheetReservas = getSheet(SHEET_RESERVAS);
+      appendRowByHeaders(sheetReservas, {
+        ID: Utilities.getUuid(),
+        Espacio: s.Espacio,
+        Fecha: s.Fecha,
+        HoraInicio: s.HoraInicio,
+        HoraFin: s.HoraFin,
+        SolicitadoPor: s.NombreCompleto,
+        CorreoResponsable: s.Correo,
+        Telefono: s.Telefono,
+        Motivo: 'Solicitud de estudiante — Coordinador: ' + s.Coordinador + ' · ID: ' + s.IDEstudiante,
+        ServiciosCocina: '', CantidadPersonas: '', TipoServicio: '', CuentaCargo: '',
+        Estado: 'Confirmada',
+        CreadoEn: new Date(),
+      });
+
+      sheet.getRange(row, col('Estado')).setValue('Aprobada');
+      enviarCorreoSolicitud('aprobada', s);
+      return { success: true };
+    }
+  }
+  return { error: 'Solicitud no encontrada' };
+}
+
+function rechazarSolicitud(body) {
+  if (!body.id) return { error: 'Falta el id de la solicitud' };
+  if (!body.Razon) return { error: 'Debes indicar la razón del rechazo.' };
+
+  const sheet = getSheet(SHEET_SOLICITUDES);
+  const headers = asegurarColumnas(sheet, SOLICITUDES_HEADERS);
+  const col = name => headers.indexOf(name) + 1;
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === body.id) {
+      const row = i + 1;
+      if (data[i][col('Estado') - 1] !== 'Pendiente') {
+        return { error: 'Esta solicitud ya fue procesada.' };
+      }
+      sheet.getRange(row, col('Estado')).setValue('Rechazada');
+      sheet.getRange(row, col('RazonRechazo')).setValue(body.Razon);
+
+      enviarCorreoSolicitud('rechazada', {
+        Espacio: data[i][col('Espacio') - 1],
+        Fecha: fmtDate(data[i][col('Fecha') - 1]),
+        HoraInicio: fmtTime(data[i][col('HoraInicio') - 1]),
+        HoraFin: fmtTime(data[i][col('HoraFin') - 1]),
+        NombreCompleto: data[i][col('NombreCompleto') - 1],
+        Correo: data[i][col('Correo') - 1],
+        Razon: body.Razon,
+      });
+
+      return { success: true };
+    }
+  }
+  return { error: 'Solicitud no encontrada' };
+}
+
+function enviarCorreoSolicitud(tipo, s) {
+  if (!s.Correo) return;
+  let asunto, cuerpo;
+
+  if (tipo === 'recibida') {
+    asunto = 'Solicitud recibida: ' + s.Espacio + ' - ' + s.Fecha;
+    cuerpo =
+      'SOLICITUD DE ESPACIO RECIBIDA\n\n' +
+      'Hemos recibido tu solicitud para el uso de un espacio de reuniones. Quedará pendiente de aprobación por parte del Decanato de Postgrado.\n\n' +
+      'DETALLE DE LA SOLICITUD\n\n' +
+      '* Espacio: ' + s.Espacio + '\n' +
+      '* Fecha: ' + s.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(s.HoraInicio, s.HoraFin) + '\n' +
+      '* Nombre: ' + s.NombreCompleto + '\n' +
+      '* Coordinador: ' + s.Coordinador + '\n\n' +
+      'Te notificaremos por este medio en cuanto tu solicitud sea aprobada o rechazada.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else if (tipo === 'aprobada') {
+    asunto = 'Solicitud aprobada: ' + s.Espacio + ' - ' + s.Fecha;
+    cuerpo =
+      'SOLICITUD DE ESPACIO APROBADA\n\n' +
+      'Tu solicitud ha sido APROBADA por el Decanato de Postgrado. El espacio queda reservado para ti.\n\n' +
+      'DETALLE DE LA RESERVA\n\n' +
+      '* Espacio: ' + s.Espacio + '\n' +
+      '* Fecha: ' + s.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(s.HoraInicio, s.HoraFin) + '\n' +
+      '* Nombre: ' + s.NombreCompleto + '\n\n' +
+      'Por favor respeta el horario asignado y las normas de uso del espacio.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else if (tipo === 'rechazada') {
+    asunto = 'Solicitud rechazada: ' + s.Espacio + ' - ' + s.Fecha;
+    cuerpo =
+      'SOLICITUD DE ESPACIO RECHAZADA\n\n' +
+      'Lamentamos informarte que tu solicitud fue RECHAZADA por el Decanato de Postgrado.\n\n' +
+      'DETALLE DE LA SOLICITUD\n\n' +
+      '* Espacio: ' + s.Espacio + '\n' +
+      '* Fecha: ' + s.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(s.HoraInicio, s.HoraFin) + '\n\n' +
+      'MOTIVO DEL RECHAZO\n' + s.Razon + '\n\n' +
+      'Si tienes dudas, puedes comunicarte con el Decanato de Postgrado.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else {
+    return;
+  }
+
+  try {
+    MailApp.sendEmail({ to: s.Correo, subject: asunto, body: cuerpo, name: NOMBRE_REMITENTE });
+  } catch (err) {
+    Logger.log('Error enviando correo de solicitud: ' + err.message);
+  }
+}
+
+function createReservation(body) {
+  const error = validarCamposReserva(body);
+  if (error) return { error: error };
+
+  const choque = hayChoque(body.Espacio, body.Fecha, body.HoraInicio, body.HoraFin, null);
+  if (choque) return { error: choque };
+
+  const sheet = getSheet(SHEET_RESERVAS);
+  const id = Utilities.getUuid();
+  appendRowByHeaders(sheet, {
+    ID: id,
+    Espacio: body.Espacio,
+    Fecha: body.Fecha,
+    HoraInicio: body.HoraInicio,
+    HoraFin: body.HoraFin,
+    SolicitadoPor: body.SolicitadoPor,
+    CorreoResponsable: body.CorreoResponsable,
+    Telefono: body.Telefono,
+    Motivo: body.Motivo,
+    ServiciosCocina: body.ServiciosCocina || '',
+    CantidadPersonas: body.CantidadPersonas || '',
+    TipoServicio: body.TipoServicio || '',
+    CuentaCargo: body.CuentaCargo || '',
+    Estado: 'Confirmada',
+    CreadoEn: new Date(),
+  });
+
+  enviarCorreoReserva('creada', {
+    Espacio: body.Espacio, Fecha: body.Fecha, HoraInicio: body.HoraInicio, HoraFin: body.HoraFin,
+    SolicitadoPor: body.SolicitadoPor, CorreoResponsable: body.CorreoResponsable,
+    Telefono: body.Telefono, Motivo: body.Motivo
+  });
+
+  if (body.ServiciosCocina && body.CorreoEventos) {
+    enviarCorreoCocina('solicitud', {
+      Espacio: body.Espacio, Fecha: body.Fecha, HoraInicio: body.HoraInicio, HoraFin: body.HoraFin,
+      SolicitadoPor: body.SolicitadoPor, Telefono: body.Telefono, Motivo: body.Motivo,
+      ServiciosCocina: body.ServiciosCocina, CantidadPersonas: body.CantidadPersonas,
+      TipoServicio: body.TipoServicio, CuentaCargo: body.CuentaCargo,
+      CorreoEventos: body.CorreoEventos
+    });
+  }
+
+  return { success: true, id: id };
+}
+
+function moveReservation(body) {
+  if (!body.id) return { error: 'Falta el id de la reserva a mover' };
+  const error = validarCamposReserva(body);
+  if (error) return { error: error };
+
+  const sheet = getSheet(SHEET_RESERVAS);
+  const headers = asegurarColumnas(sheet, RESERVAS_HEADERS);
+  const col = name => headers.indexOf(name) + 1;
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === body.id) {
+      const row = i + 1;
+      const anterior = {
+        Espacio: data[i][col('Espacio') - 1],
+        Fecha: fmtDate(data[i][col('Fecha') - 1]),
+        HoraInicio: fmtTime(data[i][col('HoraInicio') - 1]),
+        HoraFin: fmtTime(data[i][col('HoraFin') - 1]),
+      };
+
+      const choque = hayChoque(body.Espacio, body.Fecha, body.HoraInicio, body.HoraFin, body.id);
+      if (choque) return { error: choque };
+
+      sheet.getRange(row, col('Espacio')).setValue(body.Espacio);
+      sheet.getRange(row, col('Fecha')).setValue(body.Fecha);
+      sheet.getRange(row, col('HoraInicio')).setNumberFormat('@').setValue(body.HoraInicio);
+      sheet.getRange(row, col('HoraFin')).setNumberFormat('@').setValue(body.HoraFin);
+      sheet.getRange(row, col('SolicitadoPor')).setValue(body.SolicitadoPor);
+      sheet.getRange(row, col('CorreoResponsable')).setValue(body.CorreoResponsable);
+      sheet.getRange(row, col('Telefono')).setValue(body.Telefono);
+      sheet.getRange(row, col('Motivo')).setValue(body.Motivo);
+      sheet.getRange(row, col('ServiciosCocina')).setValue(body.ServiciosCocina || '');
+      sheet.getRange(row, col('CantidadPersonas')).setValue(body.CantidadPersonas || '');
+      sheet.getRange(row, col('TipoServicio')).setValue(body.TipoServicio || '');
+      sheet.getRange(row, col('CuentaCargo')).setValue(body.CuentaCargo || '');
+      sheet.getRange(row, col('Estado')).setValue('Confirmada');
+
+      enviarCorreoReserva('movida', {
+        Espacio: body.Espacio, Fecha: body.Fecha, HoraInicio: body.HoraInicio, HoraFin: body.HoraFin,
+        SolicitadoPor: body.SolicitadoPor, CorreoResponsable: body.CorreoResponsable,
+        Telefono: body.Telefono, Motivo: body.Motivo
+      }, anterior);
+
+      if (body.ServiciosCocina && body.CorreoEventos) {
+        enviarCorreoCocina('movida', {
+          Espacio: body.Espacio, Fecha: body.Fecha, HoraInicio: body.HoraInicio, HoraFin: body.HoraFin,
+          SolicitadoPor: body.SolicitadoPor, Telefono: body.Telefono, Motivo: body.Motivo,
+          ServiciosCocina: body.ServiciosCocina, CantidadPersonas: body.CantidadPersonas,
+          TipoServicio: body.TipoServicio, CuentaCargo: body.CuentaCargo,
+          CorreoEventos: body.CorreoEventos
+        }, anterior);
+      }
+
+      return { success: true };
+    }
+  }
+  return { error: 'Reserva no encontrada' };
+}
+
+function cancelReservation(body) {
+  const id = (typeof body === 'string') ? body : body.id;
+  const sheet = getSheet(SHEET_RESERVAS);
+  const headers = asegurarColumnas(sheet, RESERVAS_HEADERS);
+  const col = name => headers.indexOf(name) + 1;
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === id) {
+      const row = i + 1;
+      sheet.getRange(row, col('Estado')).setValue('Cancelada');
+
+      const serviciosCocina = data[i][col('ServiciosCocina') - 1];
+      const cantidadPersonas = data[i][col('CantidadPersonas') - 1];
+      const tipoServicio = data[i][col('TipoServicio') - 1];
+      const cuentaCargo = data[i][col('CuentaCargo') - 1];
+
+      enviarCorreoReserva('cancelada', {
+        Espacio: data[i][col('Espacio') - 1],
+        Fecha: fmtDate(data[i][col('Fecha') - 1]),
+        HoraInicio: fmtTime(data[i][col('HoraInicio') - 1]),
+        HoraFin: fmtTime(data[i][col('HoraFin') - 1]),
+        SolicitadoPor: data[i][col('SolicitadoPor') - 1],
+        CorreoResponsable: data[i][col('CorreoResponsable') - 1],
+        Telefono: data[i][col('Telefono') - 1],
+        Motivo: data[i][col('Motivo') - 1],
+      });
+
+      // body.CorreoEventos lo manda la app (calculado según el campus del espacio
+      // en el momento de cancelar), porque el correo de eventos no se guarda en la hoja.
+      if (serviciosCocina && typeof body === 'object' && body.CorreoEventos) {
+        enviarCorreoCocina('cancelada', {
+          Espacio: data[i][col('Espacio') - 1],
+          Fecha: fmtDate(data[i][col('Fecha') - 1]),
+          HoraInicio: fmtTime(data[i][col('HoraInicio') - 1]),
+          HoraFin: fmtTime(data[i][col('HoraFin') - 1]),
+          SolicitadoPor: data[i][col('SolicitadoPor') - 1],
+          Telefono: data[i][col('Telefono') - 1],
+          Motivo: data[i][col('Motivo') - 1],
+          TipoServicio: tipoServicio,
+          CuentaCargo: cuentaCargo,
+          ServiciosCocina: serviciosCocina,
+          CantidadPersonas: cantidadPersonas,
+          CorreoEventos: body.CorreoEventos,
+        });
+      }
+
+      return { success: true };
+    }
+  }
+  return { error: 'Reserva no encontrada' };
+}
+
+// ----------------------------------------------------------------
+// NOTIFICACIONES POR CORREO
+// ----------------------------------------------------------------
+
+function enviarCorreoReserva(tipo, r, anterior) {
+  if (!r.CorreoResponsable) return;
+
+  let asunto, cuerpo;
+
+  if (tipo === 'creada') {
+    asunto = 'Confirmación de Reserva - ' + r.Espacio + ' - ' + r.Fecha;
+    cuerpo =
+      'CONFIRMACIÓN DE RESERVA\n\n' +
+      'Le informamos que su reserva ha sido confirmada exitosamente.\n\n' +
+      'DETALLE DE LA RESERVA\n\n' +
+      '* Espacio: ' + r.Espacio + '\n' +
+      '* Fecha: ' + r.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(r.HoraInicio, r.HoraFin) + '\n' +
+      '* Solicitado por: ' + r.SolicitadoPor + '\n' +
+      '* Teléfono: ' + r.Telefono + '\n' +
+      '* Motivo: ' + r.Motivo + '\n\n' +
+      'Esta notificación se genera automáticamente como parte del sistema de gestión y seguimiento de reservas de espacios del Decanato de Postgrado.\n' +
+      'Agradecemos utilizar adecuadamente el espacio reservado y respetar el horario establecido.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else if (tipo === 'movida') {
+    asunto = 'Modificación de Reserva - ' + r.Espacio + ' - ' + r.Fecha;
+    cuerpo =
+      'NOTIFICACIÓN DE MODIFICACIÓN DE RESERVA\n\n' +
+      'Le informamos que la siguiente reserva fue modificada (cambio de horario y/o espacio):\n\n';
+    if (anterior) {
+      cuerpo +=
+        'DATOS ANTERIORES\n\n' +
+        '* Espacio: ' + anterior.Espacio + '\n' +
+        '* Fecha: ' + anterior.Fecha + '\n' +
+        '* Horario: ' + fmtRangoHoras(anterior.HoraInicio, anterior.HoraFin) + '\n\n';
+    }
+    cuerpo +=
+      'DATOS NUEVOS\n\n' +
+      '* Espacio: ' + r.Espacio + '\n' +
+      '* Fecha: ' + r.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(r.HoraInicio, r.HoraFin) + '\n' +
+      '* Solicitado por: ' + r.SolicitadoPor + '\n' +
+      '* Teléfono: ' + r.Telefono + '\n' +
+      '* Motivo: ' + r.Motivo + '\n\n' +
+      'Esta notificación se genera automáticamente como parte del sistema de gestión y seguimiento de reservas de espacios del Decanato de Postgrado.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else if (tipo === 'cancelada') {
+    asunto = 'Cancelación de Reserva - ' + r.Espacio + ' - ' + r.Fecha;
+    cuerpo =
+      'NOTIFICACIÓN DE CANCELACIÓN DE RESERVA\n\n' +
+      'Le informamos que la siguiente reserva ha sido cancelada:\n\n' +
+      'DETALLE DE LA RESERVA\n\n' +
+      '* Espacio: ' + r.Espacio + '\n' +
+      '* Fecha: ' + r.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(r.HoraInicio, r.HoraFin) + '\n' +
+      '* Solicitado por: ' + r.SolicitadoPor + '\n' +
+      '* Teléfono: ' + r.Telefono + '\n' +
+      '* Motivo: ' + r.Motivo + '\n\n' +
+      'Esta notificación se genera automáticamente como parte del sistema de gestión y seguimiento de reservas de espacios del Decanato de Postgrado.\n' +
+      'Si tiene alguna consulta relacionada con esta cancelación, favor comunicarse con el Decanato de Postgrado.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else {
+    return;
+  }
+
+  try {
+    MailApp.sendEmail({
+      to: r.CorreoResponsable,
+      subject: asunto,
+      body: cuerpo,
+      name: NOMBRE_REMITENTE,
+    });
+  } catch (err) {
+    // No se detiene la operación principal si el correo falla; queda registrado en el log.
+    Logger.log('Error enviando correo: ' + err.message);
+  }
+}
+
+// ----------------------------------------------------------------
+// NOTIFICACIÓN AL DEPARTAMENTO DE EVENTOS / COCINA
+// ----------------------------------------------------------------
+/**
+ * r.CorreoEventos lo calcula y envía la app web (según el campus del espacio
+ * reservado), no vive en la hoja. Este correo es aparte del correo de
+ * confirmación que recibe el responsable de la reserva.
+ */
+/** Convierte "14:00" a "2:00 pm" para mostrar en los correos. */
+function fmtHora12(hhmm) {
+  if (!hhmm || typeof hhmm !== 'string' || hhmm.indexOf(':') === -1) return hhmm || '';
+  const partes = hhmm.split(':');
+  let h = parseInt(partes[0], 10);
+  const m = partes[1];
+  const ampm = h >= 12 ? 'pm' : 'am';
+  let h12 = h % 12;
+  if (h12 === 0) h12 = 12;
+  return h12 + ':' + m + ' ' + ampm;
+}
+function fmtRangoHoras(inicio, fin) {
+  return fmtHora12(inicio) + ' a ' + fmtHora12(fin);
+}
+
+function enviarCorreoCocina(tipo, r, anterior) {
+  if (!r.CorreoEventos) return;
+
+  const servicios = r.ServiciosCocina || '';
+  const marcaCafeAgua = (servicios.indexOf('café y agua') !== -1 || servicios === 'Ambos servicios') ? '☒' : '☐';
+  const marcaAsistencia = (servicios.indexOf('Asistencia de cocina') !== -1 || servicios === 'Ambos servicios') ? '☒' : '☐';
+  const marcaAmbos = (servicios === 'Ambos servicios') ? '☒' : '☐';
+  const cantidad = r.CantidadPersonas || 'No especificada';
+  const tipoServicioTexto = r.TipoServicio === 'Externo' ? 'Servicio Externo (Con Cargos)'
+                           : r.TipoServicio === 'Interno' ? 'Servicio interno (Sin cargos)'
+                           : 'No especificado';
+  const lineaCuenta = r.TipoServicio === 'Externo'
+    ? '* Cuenta y departamento a cargar: ' + (r.CuentaCargo || 'No especificado') + '\n'
+    : '';
+
+  let asunto, cuerpo;
+
+  if (tipo === 'solicitud' || tipo === 'movida') {
+    asunto = (tipo === 'movida' ? 'Actualización de Solicitud de Asistencia – Reunión - ' : 'Solicitud de Asistencia – Reunión - ') + r.Espacio + ' - ' + r.Fecha;
+    cuerpo = 'SOLICITUD DE ASISTENCIA – REUNIÓN\n\n';
+    if (tipo === 'movida' && anterior) {
+      cuerpo += 'La reunión asociada a esta solicitud fue MOVIDA. Los datos abajo ya son los actualizados.\n\n' +
+                'HORARIO ANTERIOR: ' + anterior.Espacio + ', ' + anterior.Fecha + ', ' + fmtRangoHoras(anterior.HoraInicio, anterior.HoraFin) + '\n\n';
+    } else {
+      cuerpo += 'Por medio de la presente, se informa que se requiere asistencia del área de Cocina para la siguiente reunión:\n\n';
+    }
+    cuerpo +=
+      'DETALLE DE LA REUNIÓN\n\n' +
+      '* Espacio: ' + r.Espacio + '\n' +
+      '* Fecha: ' + r.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(r.HoraInicio, r.HoraFin) + '\n' +
+      '* Solicitado por: ' + r.SolicitadoPor + '\n' +
+      '* Cantidad de personas: ' + cantidad + '\n' +
+      '* Motivo: ' + r.Motivo + '\n' +
+      '* Tipo de servicio: ' + tipoServicioTexto + '\n' +
+      lineaCuenta + '\n' +
+      'ASISTENCIA SOLICITADA\n' +
+      marcaCafeAgua + ' Servicio de café y agua\n' +
+      marcaAsistencia + ' Asistencia de cocina durante la reunión\n' +
+      marcaAmbos + ' Ambos servicios\n\n' +
+      'Agradecemos su apoyo y colaboración para garantizar la atención correspondiente durante la actividad.\n\n' +
+      'Este es un mensaje generado automáticamente por el sistema de gestión de reservas del Decanato de Postgrado.';
+
+  } else if (tipo === 'cancelada') {
+    asunto = 'Cancelación de Evento - ' + r.Espacio + ' - ' + r.Fecha;
+    cuerpo =
+      'NOTIFICACIÓN DE CANCELACIÓN DE EVENTO\n\n' +
+      'Por medio de la presente, se informa que el siguiente evento ha sido cancelado:\n\n' +
+      'DETALLE DEL EVENTO\n\n' +
+      '* Evento: ' + r.Motivo + '\n' +
+      '* Espacio: ' + r.Espacio + '\n' +
+      '* Fecha: ' + r.Fecha + '\n' +
+      '* Horario: ' + fmtRangoHoras(r.HoraInicio, r.HoraFin) + '\n' +
+      '* Responsable: ' + r.SolicitadoPor + '\n' +
+      '* Teléfono: ' + r.Telefono + '\n' +
+      '* Motivo: ' + r.Motivo + '\n' +
+      '* Tipo de servicio: ' + tipoServicioTexto + '\n' +
+      lineaCuenta + '\n' +
+      'Esta notificación se genera automáticamente como parte del sistema de gestión y seguimiento de eventos del Decanato de Postgrado.\n' +
+      'Agradecemos tomar las medidas correspondientes respecto a la cancelación del evento.\n\n' +
+      'Este es un mensaje generado automáticamente. Por favor, no responda a este correo.';
+
+  } else {
+    return;
+  }
+
+  try {
+    MailApp.sendEmail({
+      to: r.CorreoEventos,
+      subject: asunto,
+      body: cuerpo,
+      name: NOMBRE_REMITENTE,
+    });
+  } catch (err) {
+    Logger.log('Error enviando correo a cocina/eventos: ' + err.message);
+  }
+}
+
+/**
+ * ------------------------------------------------------------------
+ * CÓMO DESPLEGAR ESTE SCRIPT COMO WEB APP
+ * ------------------------------------------------------------------
+ * 1. En tu Google Sheet: Extensiones > Apps Script.
+ * 2. Borra el contenido de Code.gs y pega este archivo completo.
+ * 3. Guarda el proyecto (ícono de disco o Ctrl+S).
+ * 4. Crea las hojas automáticamente: en el menú desplegable de funciones
+ *    (junto al botón "Ejecutar"), elige "configurarHojas" y haz clic en
+ *    "Ejecutar". Autoriza los permisos si te los pide. Esto crea las
+ *    pestañas "Espacios" y "Reservas" con los encabezados correctos
+ *    (si ya existían, no las toca).
+ * 5. Haz clic en "Implementar" > "Nueva implementación".
+ * 6. Tipo: "Aplicación web" (haz clic en el ícono de engranaje si no ves
+ *    esta opción, y selecciónala ahí).
+ * 7. Ejecutar como: "Yo (tu correo)".
+ * 8. Quién tiene acceso: "Cualquier usuario dentro de [tu organización]"
+ *    (o "Cualquier usuario" si tu equipo usa cuentas personales).
+ * 9. Haz clic en "Implementar" y AUTORIZA los permisos cuando te los pida,
+ *    incluyendo el de "Enviar correo electrónico en tu nombre" (necesario
+ *    para las notificaciones de reservas creadas/movidas/canceladas).
+ * 10. En el cuadro de confirmación, copia la URL que termina en /exec —
+ *     esa es la URL que debes pegar en la pestaña "Configuración" de la
+ *     aplicación web. Pruébala primero pegándola en el navegador con
+ *     ?action=all al final; debe devolver un JSON, no un error 404.
+ *
+ * Cada vez que edites este script, debes crear una NUEVA versión desde
+ * "Implementar > Administrar implementaciones > Editar (ícono de lápiz)
+ * > Nueva versión > Implementar" para que los cambios se reflejen en la
+ * URL ya publicada. La URL /exec no cambia entre versiones.
+ */
