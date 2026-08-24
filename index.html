@@ -378,6 +378,11 @@
 // ============================================================
 const CONFIG_PASSWORD = 'Gabriel032402';
 
+// Debe coincidir EXACTAMENTE con ADMIN_SECRET en Code.gs. Protege el backend
+// para que nadie pueda ejecutar acciones administrativas hablándole
+// directamente a la URL del script, sin pasar por esta app.
+const ADMIN_SECRET = 'PUCMM-Postgrado-2026-9fK3mQ7z';
+
 let STATE = {
   view: 'home',
   apiUrl: null,
@@ -457,15 +462,16 @@ function correoEventosParaCampus(campus) {
 // API (Google Apps Script Web App)
 // ============================================================
 async function apiGet(action) {
-  const res = await fetch(STATE.apiUrl + '?action=' + action);
+  const res = await fetch(STATE.apiUrl + '?action=' + action + '&adminKey=' + encodeURIComponent(ADMIN_SECRET));
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
 async function apiPost(payload) {
+  const conLlave = Object.assign({ adminKey: ADMIN_SECRET }, payload);
   const res = await fetch(STATE.apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(conLlave),
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
