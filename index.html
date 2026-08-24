@@ -490,6 +490,21 @@ function escapeHtml(str) {
   return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Convierte "14:00" a "2:00 pm" para mostrarlo en toda la app
+function fmtHora12(hhmm) {
+  if (!hhmm || typeof hhmm !== 'string' || hhmm.indexOf(':') === -1) return hhmm || '';
+  const [hStr, m] = hhmm.split(':');
+  let h = parseInt(hStr, 10);
+  if (isNaN(h)) return hhmm;
+  const ampm = h >= 12 ? 'pm' : 'am';
+  let h12 = h % 12;
+  if (h12 === 0) h12 = 12;
+  return `${h12}:${m} ${ampm}`;
+}
+function fmtRangoHoras(inicio, fin) {
+  return `${fmtHora12(inicio)} a ${fmtHora12(fin)}`;
+}
+
 // ============================================================
 // ÍCONO DE SALA SEGÚN CANTIDAD DE ASIENTOS
 // ============================================================
@@ -691,7 +706,7 @@ function homeView() {
       </div>
       <div class="stat-card stat-card-wide">
         <div class="stat-value stat-value-sm">${proxima ? escapeHtml(proxima.Espacio) : 'Sin reservas próximas'}</div>
-        <div class="stat-label">${proxima ? `Próxima reserva · ${escapeHtml(proxima.Fecha)} ${escapeHtml(proxima.HoraInicio)}` : 'Próxima reserva'}</div>
+        <div class="stat-label">${proxima ? `Próxima reserva · ${escapeHtml(proxima.Fecha)} ${escapeHtml(fmtHora12(proxima.HoraInicio))}` : 'Próxima reserva'}</div>
       </div>
     </div>
 
@@ -762,7 +777,7 @@ function reservasView() {
     <tr>
       <td>${escapeHtml(r.Espacio)}</td>
       <td>${escapeHtml(r.Fecha)}</td>
-      <td>${escapeHtml(r.HoraInicio)} – ${escapeHtml(r.HoraFin)}</td>
+      <td>${escapeHtml(fmtRangoHoras(r.HoraInicio, r.HoraFin))}</td>
       <td>${escapeHtml(r.SolicitadoPor)}<br><span class="cell-sub">${escapeHtml(r.CorreoResponsable||'')}</span></td>
       <td>${escapeHtml(r.Motivo || '—')}</td>
       <td style="white-space:nowrap;">
@@ -829,7 +844,7 @@ function horariosView() {
     const dimmed = hasRange && !inRange(dateStr);
     const isToday = dateStr === todayStr();
     const isSelected = STATE.calSelectedDay === dateStr;
-    const chips = evs.slice(0, 3).map(r => `<div class="cal-chip" title="${escapeHtml(r.Espacio)} · ${escapeHtml(r.HoraInicio)}-${escapeHtml(r.HoraFin)}">${escapeHtml(r.HoraInicio)} ${escapeHtml(r.Espacio)}</div>`).join('');
+    const chips = evs.slice(0, 3).map(r => `<div class="cal-chip" title="${escapeHtml(r.Espacio)} · ${escapeHtml(fmtRangoHoras(r.HoraInicio, r.HoraFin))}">${escapeHtml(fmtHora12(r.HoraInicio))} ${escapeHtml(r.Espacio)}</div>`).join('');
     const more = evs.length > 3 ? `<div class="cal-more">+${evs.length - 3} más</div>` : '';
     cells += `
       <div class="cal-cell ${dimmed?'dimmed':''} ${isSelected?'selected':''}" data-day="${dateStr}">
@@ -877,7 +892,7 @@ function horariosView() {
         <tbody>${selectedEvents.map(r => `
           <tr>
             <td>${escapeHtml(r.Espacio)}</td>
-            <td>${escapeHtml(r.HoraInicio)} – ${escapeHtml(r.HoraFin)}</td>
+            <td>${escapeHtml(fmtRangoHoras(r.HoraInicio, r.HoraFin))}</td>
             <td>${escapeHtml(r.SolicitadoPor)}<br><span class="cell-sub">${escapeHtml(r.CorreoResponsable||'')} · ${escapeHtml(r.Telefono||'')}</span></td>
             <td>${escapeHtml(r.Motivo || '—')}</td>
             <td><span class="badge ${(r.Estado||'').toLowerCase()}">${escapeHtml(r.Estado)}</span></td>
@@ -1038,6 +1053,17 @@ function reservationFormModal(payload) {
             <label>Cantidad de personas (para el servicio de cocina)</label>
             <input type="number" name="CantidadPersonas" min="1" placeholder="Ej. 15" value="${r ? escapeHtml(r.CantidadPersonas||'') : ''}">
           </div>
+          <div class="field" id="tipo-servicio-field" style="display:none;">
+            <label>Tipo de servicio</label>
+            <div class="checkbox-group">
+              <label class="checkbox-item"><input type="radio" name="TipoServicio" value="Interno" ${r && r.TipoServicio==='Interno' ? 'checked':''}> Servicio interno (Sin cargos)</label>
+              <label class="checkbox-item"><input type="radio" name="TipoServicio" value="Externo" ${r && r.TipoServicio==='Externo' ? 'checked':''}> Servicio Externo (Con Cargos)</label>
+            </div>
+          </div>
+          <div class="field" id="cuenta-cargo-field" style="display:none;">
+            <label>Cuenta y departamento a cargar</label>
+            <input type="text" name="CuentaCargo" placeholder="Ej. Cuenta 12345 - Departamento de Admisiones" value="${r ? escapeHtml(r.CuentaCargo||'') : ''}">
+          </div>
           <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 14px;">Se enviará un correo de confirmación a la dirección indicada cuando la reserva sea creada, movida o cancelada.</p>
           <div id="reservation-msg"></div>
           <button type="submit" class="btn btn-primary" id="reservation-submit">${isMove ? 'Guardar cambios' : 'Confirmar reserva'}</button>
@@ -1106,11 +1132,40 @@ function renderModal() {
     wrapper.innerHTML = reservationFormModal(m);
     app.appendChild(wrapper.firstElementChild);
     document.getElementById('reservation-form').addEventListener('submit', handleReservationFormSubmit);
+    setupServicioCocinaToggle();
   }
   document.getElementById('modal-close').addEventListener('click', closeModal);
   document.getElementById('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') closeModal(); });
 }
 function closeModal() { STATE.modal = null; render(); }
+
+function setupServicioCocinaToggle() {
+  const form = document.getElementById('reservation-form');
+  if (!form) return;
+  const cafeAgua = form.querySelector('[name="ServCafeAgua"]');
+  const asistencia = form.querySelector('[name="ServAsistencia"]');
+  const tipoServicioField = document.getElementById('tipo-servicio-field');
+  const cuentaCargoField = document.getElementById('cuenta-cargo-field');
+  const radiosTipo = form.querySelectorAll('[name="TipoServicio"]');
+
+  function actualizarVisibilidad() {
+    const algunServicio = cafeAgua.checked || asistencia.checked;
+    tipoServicioField.style.display = algunServicio ? 'block' : 'none';
+    if (!algunServicio) {
+      radiosTipo.forEach(r => r.checked = false);
+      cuentaCargoField.style.display = 'none';
+    } else {
+      const externoSeleccionado = Array.from(radiosTipo).some(r => r.value === 'Externo' && r.checked);
+      cuentaCargoField.style.display = externoSeleccionado ? 'block' : 'none';
+    }
+  }
+
+  cafeAgua.addEventListener('change', actualizarVisibilidad);
+  asistencia.addEventListener('change', actualizarVisibilidad);
+  radiosTipo.forEach(r => r.addEventListener('change', actualizarVisibilidad));
+
+  actualizarVisibilidad(); // estado inicial correcto al editar/mover una reserva existente
+}
 
 // ============================================================
 // HANDLERS POR VISTA
@@ -1220,6 +1275,14 @@ async function handleReservationFormSubmit(e) {
   // según el campus del espacio seleccionado.
   let avisoSinCorreoEventos = null;
   if (data.ServiciosCocina) {
+    if (!data.TipoServicio) {
+      msg.innerHTML = `<div class="banner error">Indica si el servicio de cocina es interno (sin cargos) o externo (con cargos).</div>`;
+      return;
+    }
+    if (data.TipoServicio === 'Externo' && !data.CuentaCargo) {
+      msg.innerHTML = `<div class="banner error">Escribe la cuenta y el departamento a cargar para el servicio externo.</div>`;
+      return;
+    }
     const espacioSel = STATE.spaces.find(s => s.Nombre === data.Espacio);
     const correoEventos = espacioSel ? correoEventosParaCampus(espacioSel.Campus) : '';
     if (correoEventos) {
@@ -1227,6 +1290,9 @@ async function handleReservationFormSubmit(e) {
     } else {
       avisoSinCorreoEventos = `Se pidió servicio de cocina, pero no hay un correo de eventos configurado para el campus "${(espacioSel && espacioSel.Campus) || 'de este espacio'}". Ve a Configuración para agregarlo. La reserva se guardó, pero cocina no fue notificada automáticamente.`;
     }
+  } else {
+    data.TipoServicio = '';
+    data.CuentaCargo = '';
   }
 
   data.action = isMove ? 'moveReservation' : 'createReservation';
